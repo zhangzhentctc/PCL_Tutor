@@ -230,8 +230,7 @@ public:
         {
           pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> blue_color (particle_cloud, 250, 99, 71);
           if (!viz.updatePointCloud (particle_cloud, blue_color, "particle cloud"))
-            ;
-		    //viz.addPointCloud (particle_cloud, blue_color, "particle cloud");
+              viz.addPointCloud (particle_cloud, blue_color, "particle cloud");
         }
       }
       return true;
@@ -243,40 +242,7 @@ public:
     }
   }
   
-//Draw the current particles
-bool
-drawParticles_old (pcl::visualization::PCLVisualizer& viz)
-{
-  ParticleFilter::PointCloudStatePtr particles = tracker_->getParticles ();
-  if (particles && new_cloud_)
-    {
-		cout<<"drawParticles effective"<<endl;
-      //Set pointCloud with particle's points
-      pcl::PointCloud<pcl::PointXYZ>::Ptr particle_cloud (new pcl::PointCloud<pcl::PointXYZ> ());
-      for (size_t i = 0; i < particles->points.size (); i++)
-	{
-	  pcl::PointXYZ point;
-          
-	  point.x = particles->points[i].x;
-	  point.y = particles->points[i].y;
-	  point.z = particles->points[i].z;
-	  particle_cloud->points.push_back (point);
-	}
 
-      //Draw red particles 
-      {
-	pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> red_color (particle_cloud, 250, 99, 71);
-
-	if (!viz.updatePointCloud (particle_cloud, red_color, "particle cloud"))
-	  viz.addPointCloud (particle_cloud, red_color, "particle cloud");
-      }
-      return true;
-    }
-  else
-    {
-      return false;
-    }
-}  
   
   
   
@@ -302,27 +268,6 @@ drawParticles_old (pcl::visualization::PCLVisualizer& viz)
     
   }
   
-  //Draw model reference point cloud
-void
-drawResult_old (pcl::visualization::PCLVisualizer& viz)
-{
-	cout<<"drawResult"<<endl;
-  ParticleXYZRPY result = tracker_->getResult ();
-  Eigen::Affine3f transformation = tracker_->toEigenMatrix (result);
-
-  //move close to camera a little for better visualization
-  transformation.translation () += Eigen::Vector3f (0.0f, 0.0f, -0.005f);
-  CloudPtr result_cloud (new Cloud ());
-  pcl::transformPointCloud<RefPointType> (*(tracker_->getReferenceCloud ()), *result_cloud, transformation);
-
-  //Draw blue model reference point cloud
-  {
-    pcl::visualization::PointCloudColorHandlerCustom<RefPointType> blue_color (result_cloud, 0, 0, 255);
-
-    if (!viz.updatePointCloud (result_cloud, blue_color, "resultcloud"))
-      viz.addPointCloud (result_cloud, blue_color, "resultcloud");
-  }
-}
 
   void
   viz_cb (pcl::visualization::PCLVisualizer& viz)
@@ -338,15 +283,14 @@ drawResult_old (pcl::visualization::PCLVisualizer& viz)
     if (new_cloud_ && cloud_pass_downsampled_)
     {
       CloudPtr cloud_pass;
-      if (!visualize_non_downsample_)
-        cloud_pass = cloud_pass_downsampled_;
-      else
-        cloud_pass = cloud_pass_;
-      
-      if (!viz.updatePointCloud (cloud_pass, "cloudpass"))
+
+      cloud_pass = cloud_orig;
+      pcl::visualization::PointCloudColorHandlerCustom<RefPointType> white_color (cloud_pass, 255, 255, 255);
+      if (!viz.updatePointCloud (cloud_pass, white_color, "cloudpass"))
         {
-          viz.addPointCloud (cloud_pass, "cloudpass");
-          viz.resetCameraViewpoint ("cloudpass");
+          viz.addPointCloud (cloud_pass, white_color, "cloudpass");
+          //viz.resetCameraViewpoint ("cloudpass");
+		  
         }
     }
 
@@ -366,7 +310,7 @@ drawResult_old (pcl::visualization::PCLVisualizer& viz)
         viz.addText ((boost::format ("number of Measured PointClouds:  %d") % cloud_pass_downsampled_->points.size ()).str (),
                      10, 40, 20, 1.0, 1.0, 1.0, "M");
         
-        viz.removeShape ("tracking");
+       viz.removeShape ("tracking");
         viz.addText ((boost::format ("tracking:        %f fps") % (1.0 / tracking_time_)).str (),
                      10, 60, 20, 1.0, 1.0, 1.0, "tracking");
         
@@ -387,35 +331,6 @@ drawResult_old (pcl::visualization::PCLVisualizer& viz)
     new_cloud_ = false;
   }
 
-  //visualization's callback function
-void
-viz_cb_old (pcl::visualization::PCLVisualizer& viz)
-{
-  boost::mutex::scoped_lock lock (mtx_);
-  if (!cloud_pass_)
-    {
-      boost::this_thread::sleep (boost::posix_time::seconds (1));
-      return;
-   }
-  //Draw downsampled point cloud from sensor    
-  if (new_cloud_ && cloud_pass_downsampled_)
-  {
-	  cout<<"viz_cb effective"<<endl;
-      CloudPtr cloud_pass;
-      cloud_pass = cloud_pass_downsampled_;
-    
-    if (!viz.updatePointCloud (cloud_pass, "cloudpass"))
-	{
-	  viz.addPointCloud (cloud_pass, "cloudpass");
-	  viz.resetCameraViewpoint ("cloudpass");
-	}
-      bool ret = drawParticles (viz);
-      if (ret)
-        drawResult (viz);
-  }
-  new_cloud_ = false;
-}
-  
   
   
   void filterPassThrough (const CloudConstPtr &cloud, Cloud &result)
@@ -615,133 +530,6 @@ viz_cb_old (pcl::visualization::PCLVisualizer& viz)
     result.is_dense = true;
   }
   
-  void
-  cloud_cb_old (const CloudConstPtr &cloud)
-  {
-    boost::mutex::scoped_lock lock (mtx_);
-    double start = pcl::getTime ();
-    FPS_CALC_BEGIN;
-    cloud_pass_.reset (new Cloud);
-    cloud_pass_downsampled_.reset (new Cloud);
-    pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients ());
-    pcl::PointIndices::Ptr inliers (new pcl::PointIndices ());
-    filterPassThrough (cloud, *cloud_pass_);
-    if (counter_ < 10)
-    {
-      gridSample (cloud_pass_, *cloud_pass_downsampled_, downsampling_grid_size_);
-    }
-    else if (counter_ == 10)
-    {
-      //gridSample (cloud_pass_, *cloud_pass_downsampled_, 0.01);
-      cloud_pass_downsampled_ = cloud_pass_;
-      CloudPtr target_cloud;
-      if (use_convex_hull_)
-      {
-        planeSegmentation (cloud_pass_downsampled_, *coefficients, *inliers);
-        if (inliers->indices.size () > 3)
-        {
-          CloudPtr cloud_projected (new Cloud);
-          cloud_hull_.reset (new Cloud);
-          nonplane_cloud_.reset (new Cloud);
-          
-          planeProjection (cloud_pass_downsampled_, *cloud_projected, coefficients);
-          convexHull (cloud_projected, *cloud_hull_, hull_vertices_);
-          
-          extractNonPlanePoints (cloud_pass_downsampled_, cloud_hull_, *nonplane_cloud_);
-          target_cloud = nonplane_cloud_;
-        }
-        else
-        {
-          PCL_WARN ("cannot segment plane\n");
-        }
-      }
-      else
-      {
-        PCL_WARN ("without plane segmentation\n");
-        target_cloud = cloud_pass_downsampled_;
-      }
-      
-      if (target_cloud != NULL)
-      {
-        PCL_INFO ("segmentation, please wait...\n");
-        std::vector<pcl::PointIndices> cluster_indices;
-        euclideanSegment (target_cloud, cluster_indices);
-        if (cluster_indices.size () > 0)
-        {
-          // select the cluster to track
-          CloudPtr temp_cloud (new Cloud);
-          extractSegmentCluster (target_cloud, cluster_indices, 0, *temp_cloud);
-          Eigen::Vector4f c;
-          pcl::compute3DCentroid<RefPointType> (*temp_cloud, c);
-          int segment_index = 0;
-          double segment_distance = c[0] * c[0] + c[1] * c[1];
-          for (size_t i = 1; i < cluster_indices.size (); i++)
-          {
-            temp_cloud.reset (new Cloud);
-            extractSegmentCluster (target_cloud, cluster_indices, int (i), *temp_cloud);
-            pcl::compute3DCentroid<RefPointType> (*temp_cloud, c);
-            double distance = c[0] * c[0] + c[1] * c[1];
-            if (distance < segment_distance)
-            {
-              segment_index = int (i);
-              segment_distance = distance;
-            }
-          }
-          
-          segmented_cloud_.reset (new Cloud);
-          extractSegmentCluster (target_cloud, cluster_indices, segment_index, *segmented_cloud_);
-          //pcl::PointCloud<pcl::Normal>::Ptr normals (new pcl::PointCloud<pcl::Normal>);
-          //normalEstimation (segmented_cloud_, *normals);
-          RefCloudPtr ref_cloud (new RefCloud);
-          //addNormalToCloud (segmented_cloud_, normals, *ref_cloud);
-          ref_cloud = segmented_cloud_;
-          RefCloudPtr nonzero_ref (new RefCloud);
-          removeZeroPoints (ref_cloud, *nonzero_ref);
-          
-          PCL_INFO ("calculating cog\n");
-          
-          RefCloudPtr transed_ref (new RefCloud);
-          pcl::compute3DCentroid<RefPointType> (*nonzero_ref, c);
-          Eigen::Affine3f trans = Eigen::Affine3f::Identity ();
-          trans.translation ().matrix () = Eigen::Vector3f (c[0], c[1], c[2]);
-          //pcl::transformPointCloudWithNormals<RefPointType> (*ref_cloud, *transed_ref, trans.inverse());
-          pcl::transformPointCloud<RefPointType> (*nonzero_ref, *transed_ref, trans.inverse());
-          CloudPtr transed_ref_downsampled (new Cloud);
-          gridSample (transed_ref, *transed_ref_downsampled, downsampling_grid_size_);
-          tracker_->setReferenceCloud (transed_ref_downsampled);
-          tracker_->setTrans (trans);
-          reference_ = transed_ref;
-          tracker_->setMinIndices (int (ref_cloud->points.size ()) / 2);
-        }
-        else
-        {
-          PCL_WARN ("euclidean segmentation failed\n");
-        }
-      }
-    }
-    else
-    {
-      //normals_.reset (new pcl::PointCloud<pcl::Normal>);
-      //normalEstimation (cloud_pass_downsampled_, *normals_);
-      //RefCloudPtr tracking_cloud (new RefCloud ());
-      //addNormalToCloud (cloud_pass_downsampled_, normals_, *tracking_cloud);
-      //tracking_cloud = cloud_pass_downsampled_;
-      
-      //*cloud_pass_downsampled_ = *cloud_pass_;
-      //cloud_pass_downsampled_ = cloud_pass_;
-      gridSampleApprox (cloud_pass_, *cloud_pass_downsampled_, downsampling_grid_size_);
-      tracking (cloud_pass_downsampled_);
-	  
-	  
-    }
-    
-    new_cloud_ = true;
-    double end = pcl::getTime ();
-    computation_time_ = end - start;
-    FPS_CALC_END("computation");
-    counter_++;
-  }
-  
 
 int
   cloud_cb  ()
@@ -782,8 +570,14 @@ int
     std::cout << "pcd file not found" << std::endl;
     return 0;
   }
-	
-	if(frame_code == 1)
+  
+  cloud_orig.reset(new Cloud());
+  if(pcl::io::loadPCDFile (path, *cloud_orig) == -1){
+    std::cout << "pcd file not found" << std::endl;
+    return 0;
+  }
+
+	if(frame_code == 3)
 		boost::this_thread::sleep(boost::posix_time::seconds(3));  
 	
 	
@@ -803,9 +597,20 @@ int
     }
     else if (counter_ == 0)
     {
-      //gridSample (cloud_pass_, *cloud_pass_downsampled_, 0.01);
+		
+	  CloudPtr target;
+	  //CloudPtr target_downsampled;
+      target.reset(new Cloud());
+      if(pcl::io::loadPCDFile (device_id_, *target) == -1){
+        std::cout << "target file not found" << std::endl;
+        return 0;
+      }
+      std::cout << "target file " << device_id_<<std::endl;
+      //gridSample (target, *target_downsampled, downsampling_grid_size_);
+	  
       cloud_pass_downsampled_ = cloud_pass_;
       CloudPtr target_cloud;
+	  
       if (use_convex_hull_)
       {
         planeSegmentation (cloud_pass_downsampled_, *coefficients, *inliers);
@@ -831,7 +636,8 @@ int
         PCL_WARN ("without plane segmentation\n");
         target_cloud = cloud_pass_downsampled_;
       }
-      
+	  
+      //target_cloud = target_downsampled;
       if (target_cloud != NULL)
       {
         PCL_INFO ("segmentation, please wait...\n");
@@ -874,9 +680,13 @@ int
           RefCloudPtr transed_ref (new RefCloud);
           pcl::compute3DCentroid<RefPointType> (*nonzero_ref, c);
           Eigen::Affine3f trans = Eigen::Affine3f::Identity ();
+		  // 3-Dimension LOCATION!!!!!
           trans.translation ().matrix () = Eigen::Vector3f (c[0], c[1], c[2]);
           //pcl::transformPointCloudWithNormals<RefPointType> (*ref_cloud, *transed_ref, trans.inverse());
           pcl::transformPointCloud<RefPointType> (*nonzero_ref, *transed_ref, trans.inverse());
+		  
+		  transed_ref=target;
+		  
           CloudPtr transed_ref_downsampled (new Cloud);
           gridSample (transed_ref, *transed_ref_downsampled, downsampling_grid_size_);
           tracker_->setReferenceCloud (transed_ref_downsampled);
@@ -929,13 +739,14 @@ int
 		break;
 	if (viewer_.wasStopped ())
       break;
-    boost::this_thread::sleep(boost::posix_time::seconds(1));  
+    boost::this_thread::sleep(boost::posix_time::seconds(1.5));  
   }
   }
   
   pcl::visualization::CloudViewer viewer_;
   pcl::PointCloud<pcl::Normal>::Ptr normals_;
   CloudPtr cloud_pass_;
+  CloudPtr cloud_orig;
   CloudPtr cloud_pass_downsampled_;
   CloudPtr plane_cloud_;
   CloudPtr nonplane_cloud_;
@@ -979,11 +790,11 @@ int
 main (int argc, char** argv)
 {
   bool use_convex_hull = true;
-  bool visualize_non_downsample = false;
+  bool visualize_non_downsample = true;
   bool visualize_particles = true;
   bool use_fixed = false;
 
-  double downsampling_grid_size = 0.01;
+  double downsampling_grid_size = 0.99;
   
   if (pcl::console::find_argument (argc, argv, "-C") > 0)
     use_convex_hull = false;
